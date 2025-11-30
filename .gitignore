@@ -1,0 +1,11 @@
+# Ignore python cache
+__pycache__/
+*.pyc
+
+# Ignore environment variables and secrets
+config/service_account.json
+.env
+
+# Ignore data files (too large/private for git)
+data/
+notebooks/.ipynb_checkpoints

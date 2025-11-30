@@ -9,3 +9,4 @@ config/service_account.json
 # Ignore data files (too large/private for git)
 data/
 notebooks/.ipynb_checkpoints
+venv/

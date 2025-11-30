@@ -86,7 +86,7 @@ def upload_to_sheets(df):
         payload = [df.columns.values.tolist()] + df.values.tolist()
         worksheet.update(payload)
         
-        logger.info("✅ Success! FPL_Brain is updated.")
+        logger.info("✅ Success! FPL_data is updated.")
         
     except FileNotFoundError:
         logger.error(f"❌ Could not find key file at: {KEY_FILE}")

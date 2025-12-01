@@ -2,7 +2,8 @@
 __pycache__/
 *.pyc
 
-# Ignore environment variables and secrets
+# Ignore environment variables and secrets`
+config/
 config/service_account.json
 .env
 
@@ -10,3 +11,4 @@ config/service_account.json
 data/
 notebooks/.ipynb_checkpoints
 venv/
+.vscode/

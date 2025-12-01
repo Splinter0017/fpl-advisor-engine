@@ -1,113 +1,90 @@
-FPL-Advisor-Engine: Algorithmic Sports Trading System
+# FPL-AI-Advisor: Algorithmic Sports Trading Engine
 
-Project Overview
+## Project Overview
 
-An automated decision support system for Fantasy Premier League (FPL) that treats the game as a constrained resource optimization problem. This project moves beyond simple heuristics by implementing a "Cyber-Physical System" architecture: it digitizes real-world match events, processes them through predictive models, and delivers actionable trading strategies via an LLM Agent interface.
+An automated decision support system for Fantasy Premier League (FPL) that frames the game as a resource optimization problem. The system uses a hybrid architecture combining Gradient Boosting (XGBoost) for predictive analytics and Linear Programming (MILP) for constrained portfolio optimization.
 
-The system is built on a "Three-Brain" architecture designed to solve the specific challenges of sports analytics: Signal Extraction (ETL), Outcome Prediction (ML), and Resource Allocation (OR).
+It operates as a cyber-physical system, fetching live API data, predicting player performance, and syncing optimal strategies to a cloud dashboard (Google Sheets) for consumption via an LLM agent.
 
-Architecture
+## Architecture
 
+```mermaid
 graph TD
-    subgraph "The Engineer (Data Pipeline)"
-        A[FPL API / Vaastav Repo] -->|Raw JSON/CSV| B(ETL Pipeline / src/etl.py)
-        B -->|Feature Engineering| C[Feature Store / data/processed]
-    end
-    
-    subgraph "The Analyst (Prediction)"
-        C -->|Historical Data| D{XGBoost Regressor}
-        D -->|Future Fixtures| E(Predicted Points / src/predict.py)
-    end
-    
-    subgraph "The Strategist (Optimization)"
-        E -->|Predictions + Budget| F[MILP Solver / src/optimize.py]
-        F -->|Knapsack Problem| G[Optimal Squad]
-    end
-    
-    subgraph "The Interface (Deployment)"
-        G -->|Sync| H[Google Sheets Dashboard]
-        H -->|Context| I[Gemini AI Agent]
-    end
+    A[FPL API] -->|Raw JSON| B(ETL Pipeline / src/predict.py)
+    B -->|Feature Engineering| C{XGBoost Model}
+    C -->|Predicted Points| D[Optimization Engine / src/optimize.py]
+    D -->|Linear Programming| E[Optimal Squad]
+    E -->|Sync| F[Google Sheets Dashboard]
+    F -->|Context| G[LLM Agent]
+```
 
+## The "Three-Brain" System
 
-The "Three-Brain" System
+### 1. The Analyst (Predictive Modeling)
 
-1. The Analyst (Predictive Modeling)
+**Algorithm:** XGBoost Regressor
 
-Algorithm: XGBoost Regressor (Gradient Boosting).
+**Training Data:** 4+ seasons of historical data (120k+ rows)
 
-Training Data: 4+ Seasons of historical player-match data (>120,000 rows).
+**Key Features:**
 
-Feature Engineering:
+* Tactical Vulnerability: Quantifies how many points an opponent concedes to specific positions.
+* xP Delta: Measures regression to the mean via actual points vs. underlying stats (ICT Index).
+* Team Strength Diff: Dynamic ELO-like rating difference between teams.
 
-Tactical Vulnerability (opp_def_strength_vs_pos): A dynamic matrix quantifying how many points specific opponents concede to specific positions (e.g., "Sheffield Utd weakness vs Left Wingers").
+**Performance:** Mean Absolute Error (MAE) of 1.04 points on the 2024–25 test set.
 
-Luck Detection (xp_delta): Measures regression to the mean by comparing actual points against underlying stats (ICT Index proxy for xG/xA).
+### 2. The Strategist (Operations Research)
 
-Team Strength Diff: Dynamic ELO-like rating difference between player's team and opponent.
+**Library:** PuLP (Python Linear Programming)
 
-Performance: Achieved a Mean Absolute Error (MAE) of ~1.04 points on the 2024-25 test set.
+**Problem:** Knapsack problem variant with complex constraints.
 
-2. The Strategist (Operations Research)
+**Constraints:**
 
-Library: PuLP (Python Linear Programming).
+* Budget ≤ £100.0m
+* Exact formation rules (2 GK, 5 DEF, 5 MID, 3 FWD)
+* Max 3 players per team
 
-Problem Formulation: Mixed-Integer Linear Programming (MILP) variant of the Knapsack Problem.
+**Output:** The mathematically optimal 15-man squad that maximizes expected points.
 
-Constraints:
+### 3. The Interface (Cloud Sync)
 
-Budget $\le$ £100.0m.
+Automated syncing to Google Sheets. Acts as a knowledge base for an LLM agent, enabling natural language queries such as "Why did the model pick Salah over Haaland?"
 
-Squad Size = 15 (11 Starters + 4 Bench).
+## Quick Start
 
-Formation Rules: 2 GK, 5 DEF, 5 MID, 3 FWD.
+### Clone the Repository
 
-Team Constraint: Max 3 players per Premier League club.
-
-Objective: Maximize $\sum$ Predicted Points of the Starting XI while minimizing bench cost.
-
-3. The Interface (Cloud Sync)
-
-Automation: Python scripts automatically push the "Optimal Squad" and "Predictions" to a Google Sheet via Service Account authentication.
-
-LLM Integration: A custom Gemini Gem is connected to this live sheet, acting as a "Forensic Advisor." It interprets the raw math into natural language strategy (e.g., "Salah is the captaincy pick because he faces a high-vulnerability defense, despite his high price.").
-
-Quick Start
-
-Prerequisites: Python 3.10+, Google Cloud Service Account JSON.
-
-Clone the Repo
-
-git clone [https://github.com/Splinter0017/fpl-advisor-engine.git](https://github.com/Splinter0017/fpl-advisor-engine.git)
+```bash
+git clone https://github.com/Splinter0017/fpl-advisor-engine.git
 cd fpl-advisor-engine
+```
 
+### Install Dependencies
 
-Environment Setup
-
-# Linux/Mac
-python3 -m venv venv
-source venv/bin/activate
-
-# Windows
+```bash
 python -m venv venv
-venv\Scripts\activate
-
-
-Install Dependencies
-
+source venv/bin/activate  # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
+```
 
+### Generate Predictions
 
-Configuration
-
-Place your Google Cloud service_account.json key in the config/ folder.
-
-(Optional) Adjust config/settings.yaml for custom budget constraints.
-
-Run the Engine
-
-# Step 1: Update Predictions (The Analyst)
+```bash
 python src/predict.py
+```
 
-# Step 2: Solve for Best Team (The Strategist)
+### Optimize Squad
+
+```bash
 python src/optimize.py
+```
+
+## Project Structure
+
+* **src/etl.py:** Raw data ingestion pipeline
+* **src/model.py:** Training logic for the XGBoost regressor
+* **src/predict.py:** Inference script for upcoming gameweeks
+* **src/optimize.py:** MILP solver for squad selection
+* **data/:** Processed training data and logs

@@ -4,7 +4,6 @@ __pycache__/
 
 # Ignore environment variables and secrets`
 config/
-config/service_account.json
 .env
 
 # Ignore data files (too large/private for git)

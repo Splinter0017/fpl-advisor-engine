@@ -11,3 +11,6 @@ data/
 notebooks/.ipynb_checkpoints
 venv/
 .vscode/
+run_pipeline.py
+run_fpl.bat
+

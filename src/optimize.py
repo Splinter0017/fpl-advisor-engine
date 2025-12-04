@@ -10,7 +10,7 @@ KEY_FILE = Path(__file__).parent.parent / "config" / "service_account.json"
 SHEET_NAME = "FPL_Optimization"
 
 def solve_squad_15(df, budget=100.0):
-    print(f"🤖 Optimizing Full Squad (15 Players) for Budget: £{budget}m")
+    print(f"Optimizing Full Squad (15 Players) for Budget: £{budget}m")
     
     # Clean data
     df = df.drop_duplicates(subset=['name'])
@@ -113,7 +113,7 @@ def pick_starting_11(squad):
     return starting_11, bench
 
 def upload_optimization(starters, bench):
-    print(f"☁️ Uploading Squad to Google Sheets ({SHEET_NAME})...")
+    print(f"Uploading Squad to Google Sheets ({SHEET_NAME})...")
     try:
         gc = gspread.service_account(filename=str(KEY_FILE))
         
@@ -145,10 +145,10 @@ def upload_optimization(starters, bench):
         # Upload
         payload = [final_data.columns.values.tolist()] + final_data.values.tolist()
         worksheet.update(range_name='A1', values=payload)
-        print("✅ Cloud Sync Complete.")
+        print("Cloud Sync Complete.")
         
     except Exception as e:
-        print(f"❌ Cloud Upload Failed: {e}")
+        print(f"Cloud Upload Failed: {e}")
 
 if __name__ == "__main__":
     # Load predictions
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     files = list(data_dir.glob("predictions_gw*.csv"))
     
     if not files:
-        print("❌ No prediction files found. Run predict.py first.")
+        print("No prediction files found. Run predict.py first.")
         exit()
         
     latest_file = max(files, key=lambda f: f.stat().st_mtime)
@@ -171,7 +171,7 @@ if __name__ == "__main__":
         starters, bench = pick_starting_11(squad_15)
         
         # 3. Print Local
-        print("\n🏆 STARTING XI 🏆")
+        print("\n STARTING XI ")
         print(starters[['name', 'position', 'team', 'predicted_points']])
         print(f"\nTotal Expected Points: {starters['predicted_points'].sum():.2f}")
         

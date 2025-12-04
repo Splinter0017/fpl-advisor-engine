@@ -75,6 +75,10 @@ def prepare_features(players, teams, fixture_map, historical_df):
                 'now_cost': p['now_cost'] / 10.0,
                 'was_home': str(m['was_home']),
                 'opponent_team': opp_name,
+                # --- NEW INJURY DATA ---
+                'status': p['status'], 
+                'chance_of_playing': p['chance_of_playing_next_round'], # 0, 25, 50, 75, 100
+                'news': p['news'], # "Hamstring injury - Expected back 14 Dec"
                 # Lags (Proxies from API)
                 'mean_pts_3': float(p['form']),
                 'mean_mins_3': 90.0 if p['status'] == 'a' else 0.0, # Optimistic minutes
@@ -83,7 +87,18 @@ def prepare_features(players, teams, fixture_map, historical_df):
                 'last_3_xp_delta': 0.0,
                 'team_strength_diff': 0.0 # Simplification for V1
             }
-            
+        # --- NEW INJURY DATA (Fixed Logic) ---
+            status_prob = p['chance_of_playing_next_round']
+                
+                # Logic: If API says None, it means 100% fit.
+                # If API gives a number (0, 25, 50, 75), use it.
+            if status_prob is None:
+                row['chance_of_playing'] = 100
+            else:
+                row['chance_of_playing'] = float(status_prob)
+                
+            row['status'] = p['status']
+            row['news'] = p['news']
             # Lookup Vulnerability
             row['opp_def_strength_vs_pos'] = vuln_map.get((opp_name, pos_str), 2.5) # Default 2.5 if new team
             
@@ -108,7 +123,12 @@ def upload_to_cloud(df):
         for col in upload_df.select_dtypes(['category']):
             upload_df[col] = upload_df[col].astype(str)
             
-        # Sanitize for JSON (NaN -> 0)
+        # Sanitize
+        # We assume 100% chance if missing, but 0 for other numeric stats
+        if 'chance_of_playing' in upload_df.columns:
+             upload_df['chance_of_playing'] = upload_df['chance_of_playing'].fillna(100)
+        
+        # Then fill the rest with 0
         upload_df = upload_df.fillna(0)
         
         # Upload
@@ -120,7 +140,7 @@ def upload_to_cloud(df):
         # Print the full error for debugging
         import traceback
         traceback.print_exc()
-        
+
 if __name__ == "__main__":
     hist_df = pd.read_csv(DATA_PATH)
     players, teams, fixture_map, gw = fetch_next_gameweek_data()
@@ -144,10 +164,13 @@ if __name__ == "__main__":
     preds = model.predict(prediction_df[features])
     prediction_df['predicted_points'] = preds
     
-    # Final Report
-    report = prediction_df[['name', 'position', 'team', 'opponent_team', 'now_cost', 'predicted_points']]
+    # Final Report (Updated Columns)
+    report = prediction_df[[
+        'name', 'position', 'team', 'opponent_team', 'now_cost', 
+        'predicted_points', 'chance_of_playing', 'news' # <--- Added these
+    ]]
     report = report.sort_values(by='predicted_points', ascending=False)
-    
+
     # 1. Save Local CSV (Backup)
     local_path = BASE_DIR / "data" / f"predictions_gw{gw}.csv"
     report.to_csv(local_path, index=False)

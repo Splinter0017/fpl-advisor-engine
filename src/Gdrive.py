@@ -28,7 +28,6 @@ def fetch_fpl_data():
         logger.error(f"Failed to fetch data: {e}")
         return None, None
 
-    # We need both 'elements' (players) and 'teams' (for names)
     players_df = pd.DataFrame(data['elements'])
     teams_df = pd.DataFrame(data['teams'])
     
@@ -40,7 +39,7 @@ def transform_data(players_df, teams_df):
     """
     logger.info("Processing data and calculating metrics...")
     
-    # 1. Map Team IDs to Names (e.g., 1 -> 'Arsenal')
+    # 1. Map Team IDs to Names
     team_map = pd.Series(teams_df.name.values, index=teams_df.id).to_dict()
     players_df['team_name'] = players_df['team'].map(team_map)
     
@@ -53,7 +52,7 @@ def transform_data(players_df, teams_df):
     players_df['form'] = pd.to_numeric(players_df['form'])
     players_df['ict_index'] = pd.to_numeric(players_df['ict_index'])
     
-    # 4. THE MATH: ROI Metric (Return On Investment)
+    # 4.ROI Metric (Return On Investment)
     # Logic: Who is giving me the most form per million spent?
     # Equation: Form / Cost
     players_df['roi_index'] = players_df.apply(
@@ -86,13 +85,12 @@ def upload_to_sheets(df):
         payload = [df.columns.values.tolist()] + df.values.tolist()
         worksheet.update(payload)
         
-        logger.info("✅ Success! FPL_data is updated.")
+        logger.info("Success! FPL_data is updated.")
         
     except FileNotFoundError:
-        logger.error(f"❌ Could not find key file at: {KEY_FILE}")
-        logger.error("Did you move service_account.json to the config folder?")
+        logger.error(f"Could not find key file at: {KEY_FILE}")
     except Exception as e:
-        logger.error(f"❌ Google Sheets Error: {e}")
+        logger.error(f"Google Sheets Error: {e}")
 
 if __name__ == "__main__":
     # The Pipeline Execution

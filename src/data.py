@@ -125,6 +125,22 @@ class FPLDataEngine:
             # Rename API columns to match Repo columns (Normalization)
             # API: 'total_points', 'minutes', 'opponent_team', 'was_home' (bool)
             # Repo: 'total_points', 'minutes', 'opponent_team', 'was_home' (True/False or 1/0)
+            # Map position from bootstrap data
+            position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
+            player_metadata = players[['id', 'element_type', 'team', 'web_name']].copy()
+            player_metadata['position'] = player_metadata['element_type'].map(position_map)
+
+            # Merge position and team into match history
+            live_df = live_df.merge(
+               player_metadata[['id', 'position', 'team']], 
+               left_on='element', 
+                right_on='id', 
+                  how='left'
+                )
+
+            # Map team IDs to team names
+            team_map = pd.Series(teams.name.values, index=teams.id).to_dict()
+            live_df['team'] = live_df['team'].map(team_map)
             
             # Save
             path = RAW_DIR / f"{current_season_label}_merged_gw.csv"

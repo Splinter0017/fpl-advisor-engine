@@ -122,25 +122,33 @@ class FPLDataEngine:
             live_df = pd.concat(all_history, ignore_index=True)
             live_df['season'] = current_season_label
             
-            # Rename API columns to match Repo columns (Normalization)
-            # API: 'total_points', 'minutes', 'opponent_team', 'was_home' (bool)
-            # Repo: 'total_points', 'minutes', 'opponent_team', 'was_home' (True/False or 1/0)
-            # Map position from bootstrap data
+            # Map position and team metadata from bootstrap data
             position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
             player_metadata = players[['id', 'element_type', 'team', 'web_name']].copy()
             player_metadata['position'] = player_metadata['element_type'].map(position_map)
 
-            # Merge position and team into match history
+           # Map position and team metadata from bootstrap data
+            position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
+            player_metadata = players[['id', 'element_type', 'team', 'web_name']].copy()
+            player_metadata['position'] = player_metadata['element_type'].map(position_map)
+
+            # Merge into match history
             live_df = live_df.merge(
-               player_metadata[['id', 'position', 'team']], 
-               left_on='element', 
+                player_metadata[['id', 'position', 'team', 'web_name']], 
+                left_on='element', 
                 right_on='id', 
-                  how='left'
-                )
+                how='left'
+            )
+            live_df = live_df.drop(columns=['id'])  # Remove redundant id column
 
             # Map team IDs to team names
             team_map = pd.Series(teams.name.values, index=teams.id).to_dict()
             live_df['team'] = live_df['team'].map(team_map)
+
+            # Rename web_name to name for consistency with historical data
+            if 'name' not in live_df.columns and 'web_name' in live_df.columns:
+                live_df['name'] = live_df['web_name']
+                live_df = live_df.drop(columns=['web_name'])
             
             # Save
             path = RAW_DIR / f"{current_season_label}_merged_gw.csv"

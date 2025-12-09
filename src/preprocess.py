@@ -306,6 +306,63 @@ def add_derived_fields(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
+def harmonize_team_identifiers(df: pd.DataFrame, season: str) -> pd.DataFrame:
+    """
+    Maps integer Team IDs to string Team Names using the season's reference file.
+    
+    This is critical for 'opponent_team', which often comes as an integer ID
+    (e.g., 14) that must be linked to team-level metadata (e.g., 'Man City').
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe containing 'opponent_team' column (integers)
+    season : str
+        Season identifier to locate the correct teams.csv lookup
+        
+    Returns
+    -------
+    pd.DataFrame
+        Dataframe with 'opponent_team_name' and standardized 'team' columns
+    """
+    df = df.copy()
+    
+    # 1. Load the Lookup Table (The Forensic Key)
+    teams_file = RAW_DIR / f"{season}_teams.csv"
+    
+    if not teams_file.exists():
+        logger.warning(f"Map file missing: {teams_file}. Opponent names cannot be resolved.")
+        return df
+        
+    try:
+        teams_df = pd.read_csv(teams_file)
+        
+        # Create Hash Map: ID -> Name
+        # Handle cases where column might be 'team' or 'name' in reference file
+        name_col = 'name' if 'name' in teams_df.columns else 'team'
+        id_map = pd.Series(teams_df[name_col].values, index=teams_df['id']).to_dict()
+        
+        # 2. Execute the Mapping (Opponent)
+        if 'opponent_team' in df.columns:
+            # Ensure it's numeric before mapping
+            df['opponent_team'] = pd.to_numeric(df['opponent_team'], errors='coerce')
+            df['opponent_team_name'] = df['opponent_team'].map(id_map)
+            
+            # Validation
+            missing_opps = df['opponent_team_name'].isna().sum()
+            if missing_opps > 0:
+                logger.warning(f"Season {season}: {missing_opps} opponent IDs could not be mapped to names.")
+        
+        # 3. Standardize Own Team (Safety Check)
+        # Sometimes historical data has IDs for the 'team' column too
+        if 'team' in df.columns and pd.api.types.is_numeric_dtype(df['team']):
+             df['team'] = df['team'].map(id_map)
+             logger.info(f"Mapped numeric 'team' column to names for {season}")
+
+    except Exception as e:
+        logger.error(f"Team mapping failed for {season}: {e}")
+        
+    return df
 
 # ============================================================================
 # MAIN PREPROCESSING PIPELINE
@@ -356,6 +413,7 @@ def preprocess_season(season: str) -> Optional[pd.DataFrame]:
     df = handle_expected_goals_metrics(df, season)
     df = handle_defensive_metrics(df, season)
     df = add_derived_fields(df)
+    df = harmonize_team_identifiers(df, season)
     
     # Ensure season column exists
     df['season'] = season

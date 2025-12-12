@@ -52,6 +52,18 @@ class FPLDataEngine:
                 df = pd.read_csv(path, error_bad_lines=False) # Old pandas fallback
             
             df['season'] = season
+            
+            # CRITICAL FIX: Standardize team column to names (not IDs)
+            # Historical data has 'team' as integer IDs - we need to map them
+            if 'team' in df.columns and pd.api.types.is_numeric_dtype(df['team']):
+                # Load team mapping
+                teams_file = RAW_DIR / f"{season}_teams.csv"
+                if teams_file.exists():
+                    teams_df = pd.read_csv(teams_file)
+                    team_map = pd.Series(teams_df['name'].values, index=teams_df['id']).to_dict()
+                    df['team'] = df['team'].map(team_map)
+                    logger.info(f"  Mapped team IDs to names using {season}_teams.csv")
+            
             df.to_csv(path, index=False) # Save clean version
             logger.info(f"Stats: {len(df)} rows")
             
@@ -59,7 +71,7 @@ class FPLDataEngine:
             logger.error(f"Failed to fetch stats for {season}: {e}")
             return None
 
-        # B. Fetch Team Map (To fix the ID vs Name bug)
+        # B. Fetch Team Map (Must be fetched BEFORE processing player data)
         url_teams = f"{REPO_BASE}/{season}/teams.csv"
         path_teams = RAW_DIR / f"{season}_teams.csv"
         try:
@@ -67,16 +79,18 @@ class FPLDataEngine:
             r.raise_for_status()
             with open(path_teams, 'wb') as f:
                 f.write(r.content)
-            logger.info("Teams Map acquired")
-        except Exception:
-            logger.warning(f"Could not fetch team map for {season}")
+            logger.info("  Teams map acquired")
+        except Exception as e:
+            logger.warning(f"  Could not fetch team map for {season}: {e}")
 
     def fetch_live_season(self):
         """
         Fetches the CURRENT season directly from the Official API.
         This builds a 'merged_gw.csv' equivalent from live data.
+        
+        CRITICAL FIX: Standardize output schema to match historical data
         """
-        logger.info("📡 [LIVE API] Fetching Current Season...")
+        logger.info("[LIVE API] Fetching Current Season...")
         
         try:
             # 1. Bootstrap: Get all players and teams
@@ -89,7 +103,6 @@ class FPLDataEngine:
             teams.to_csv(RAW_DIR / f"{current_season_label}_teams.csv", index=False)
             
             # 2. Get Gameweek History for EVERY player
-            # We must loop through every player ID to get their match history
             all_history = []
             player_ids = players['id'].tolist()
             
@@ -104,8 +117,6 @@ class FPLDataEngine:
                     if history:
                         p_df = pd.DataFrame(history)
                         p_df['element'] = pid # Add Player ID
-                        # Add name for easier debugging
-                        p_df['name'] = players.loc[players['id'] == pid, 'web_name'].values[0]
                         all_history.append(p_df)
                 except Exception:
                     pass
@@ -115,54 +126,75 @@ class FPLDataEngine:
                     print(f"      ... {count}/{len(player_ids)}")
             
             if not all_history:
-                logger.warning(" No match history found.")
+                logger.warning("No match history found.")
                 return
 
-            # 3. Standardization
+            # 3. Merge and Standardize Schema
             live_df = pd.concat(all_history, ignore_index=True)
             live_df['season'] = current_season_label
             
             # Map position and team metadata from bootstrap data
             position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
+            
+            # Create player metadata lookup
             player_metadata = players[['id', 'element_type', 'team', 'web_name']].copy()
             player_metadata['position'] = player_metadata['element_type'].map(position_map)
+            
+            # CRITICAL: Map team IDs to team NAMES before merge
+            team_map = pd.Series(teams['name'].values, index=teams['id']).to_dict()
+            player_metadata['team'] = player_metadata['team'].map(team_map)
 
-           # Map position and team metadata from bootstrap data
-            position_map = {1: 'GK', 2: 'DEF', 3: 'MID', 4: 'FWD'}
-            player_metadata = players[['id', 'element_type', 'team', 'web_name']].copy()
-            player_metadata['position'] = player_metadata['element_type'].map(position_map)
-
-            # Merge into match history
+            # Merge position and team into match history
             live_df = live_df.merge(
                 player_metadata[['id', 'position', 'team', 'web_name']], 
                 left_on='element', 
                 right_on='id', 
                 how='left'
             )
-            live_df = live_df.drop(columns=['id'])  # Remove redundant id column
+            live_df = live_df.drop(columns=['id'])
 
-            # Map team IDs to team names
-            team_map = pd.Series(teams.name.values, index=teams.id).to_dict()
-            live_df['team'] = live_df['team'].map(team_map)
-
-            # Rename web_name to name for consistency with historical data
-            if 'name' not in live_df.columns and 'web_name' in live_df.columns:
-                live_df['name'] = live_df['web_name']
-                live_df = live_df.drop(columns=['web_name'])
+            # Rename web_name to name for consistency
+            live_df = live_df.rename(columns={'web_name': 'name'})
+            
+            # CRITICAL FIX: Ensure 'GW' column exists (API uses 'round')
+            if 'round' in live_df.columns and 'GW' not in live_df.columns:
+                live_df['GW'] = live_df['round']
+                live_df = live_df.drop(columns=['round'])
             
             # Save
             path = RAW_DIR / f"{current_season_label}_merged_gw.csv"
             live_df.to_csv(path, index=False)
             logger.info(f"Live Data Built: {len(live_df)} rows")
             
+            # Validate schema consistency
+            logger.info("Schema validation:")
+            logger.info(f"  Has 'team' column: {'team' in live_df.columns}")
+            logger.info(f"  Team dtype: {live_df['team'].dtype}")
+            logger.info(f"  Sample teams: {live_df['team'].dropna().head(3).tolist()}")
+            
         except Exception as e:
             logger.error(f"Live Fetch Failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def run(self):
         logger.info("--- 1. STARTING HYBRID INGESTION ---")
         
-        # 1. Archive (Training Data)
+        # 1. Archive (Training Data) - MUST fetch teams FIRST
         for season in TRAINING_SEASONS:
+            # Fetch teams file first (needed for ID mapping)
+            url_teams = f"{REPO_BASE}/{season}/teams.csv"
+            path_teams = RAW_DIR / f"{season}_teams.csv"
+            try:
+                r = self.session.get(url_teams)
+                r.raise_for_status()
+                with open(path_teams, 'wb') as f:
+                    f.write(r.content)
+                logger.info(f"[{season}] Teams map downloaded")
+            except Exception as e:
+                logger.warning(f"[{season}] Could not fetch team map: {e}")
+            
+            # Now fetch player data
             self.fetch_archived_season(season)
             time.sleep(1)
             

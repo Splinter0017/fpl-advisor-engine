@@ -14,9 +14,6 @@ Mathematical Foundation:
 The preprocessing establishes a canonical feature space X ∈ R^(n×p) where n represents
 player-match observations and p represents standardized features. This transformation
 ensures temporal consistency required for valid time series modeling.
-
-Author: Splinter
-Date: December 2024
 """
 
 import pandas as pd
@@ -271,9 +268,10 @@ def add_derived_fields(df: pd.DataFrame) -> pd.DataFrame:
     """
     Adds derived fields that will be useful for feature engineering.
     
+    CRITICAL: Removed points_per_minute to avoid data leakage.
+    
     Derived fields include:
     - match_score: String representation of final score
-    - points_per_minute: Efficiency metric (handles division by zero)
     - is_starter: Boolean indicating if player started (>= 60 minutes heuristic)
     
     Parameters
@@ -292,14 +290,6 @@ def add_derived_fields(df: pd.DataFrame) -> pd.DataFrame:
     if 'team_h_score' in df.columns and 'team_a_score' in df.columns:
         df['match_score'] = df['team_h_score'].astype(str) + '-' + df['team_a_score'].astype(str)
     
-    # Points per minute (handles zero minutes)
-    if 'total_points' in df.columns and 'minutes' in df.columns:
-        df['points_per_minute'] = np.where(
-            df['minutes'] > 0,
-            df['total_points'] / df['minutes'],
-            0
-        )
-    
     # Starter indicator (heuristic: 60+ minutes)
     if 'minutes' in df.columns:
         df['is_starter'] = (df['minutes'] >= 60).astype(int)
@@ -313,6 +303,9 @@ def harmonize_team_identifiers(df: pd.DataFrame, season: str) -> pd.DataFrame:
     This is critical for 'opponent_team', which often comes as an integer ID
     (e.g., 14) that must be linked to team-level metadata (e.g., 'Man City').
     
+    CRITICAL FIX: data.py now handles 'team' column mapping, so we only need
+    to handle 'opponent_team' here.
+    
     Parameters
     ----------
     df : pd.DataFrame
@@ -323,11 +316,11 @@ def harmonize_team_identifiers(df: pd.DataFrame, season: str) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Dataframe with 'opponent_team_name' and standardized 'team' columns
+        Dataframe with 'opponent_team_name' column
     """
     df = df.copy()
     
-    # 1. Load the Lookup Table (The Forensic Key)
+    # 1. Load the Lookup Table
     teams_file = RAW_DIR / f"{season}_teams.csv"
     
     if not teams_file.exists():
@@ -338,11 +331,10 @@ def harmonize_team_identifiers(df: pd.DataFrame, season: str) -> pd.DataFrame:
         teams_df = pd.read_csv(teams_file)
         
         # Create Hash Map: ID -> Name
-        # Handle cases where column might be 'team' or 'name' in reference file
         name_col = 'name' if 'name' in teams_df.columns else 'team'
         id_map = pd.Series(teams_df[name_col].values, index=teams_df['id']).to_dict()
         
-        # 2. Execute the Mapping (Opponent)
+        # 2. Map Opponent Team IDs to Names
         if 'opponent_team' in df.columns:
             # Ensure it's numeric before mapping
             df['opponent_team'] = pd.to_numeric(df['opponent_team'], errors='coerce')
@@ -353,11 +345,13 @@ def harmonize_team_identifiers(df: pd.DataFrame, season: str) -> pd.DataFrame:
             if missing_opps > 0:
                 logger.warning(f"Season {season}: {missing_opps} opponent IDs could not be mapped to names.")
         
-        # 3. Standardize Own Team (Safety Check)
-        # Sometimes historical data has IDs for the 'team' column too
-        if 'team' in df.columns and pd.api.types.is_numeric_dtype(df['team']):
-             df['team'] = df['team'].map(id_map)
-             logger.info(f"Mapped numeric 'team' column to names for {season}")
+        # 3. Validate Own Team Column (Should already be names from data.py)
+        if 'team' in df.columns:
+            if pd.api.types.is_numeric_dtype(df['team']):
+                logger.warning(f"Season {season}: 'team' column is numeric - this should have been fixed in data.py")
+                df['team'] = df['team'].map(id_map)
+            else:
+                logger.info(f"Season {season}: 'team' column verified as string names")
 
     except Exception as e:
         logger.error(f"Team mapping failed for {season}: {e}")
@@ -379,8 +373,9 @@ def preprocess_season(season: str) -> Optional[pd.DataFrame]:
     4. Resolve duplicate records
     5. Handle expected goals metrics
     6. Handle defensive metrics
-    7. Add derived fields
-    8. Validate schema completeness
+    7. Add derived fields (NO DATA LEAKAGE)
+    8. Harmonize team identifiers
+    9. Validate schema completeness
     
     Parameters
     ----------
@@ -412,7 +407,7 @@ def preprocess_season(season: str) -> Optional[pd.DataFrame]:
     df = resolve_duplicates(df)
     df = handle_expected_goals_metrics(df, season)
     df = handle_defensive_metrics(df, season)
-    df = add_derived_fields(df)
+    df = add_derived_fields(df)  # Now safe - no data leakage
     df = harmonize_team_identifiers(df, season)
     
     # Ensure season column exists
@@ -492,8 +487,14 @@ def preprocess_all_seasons(save: bool = True) -> pd.DataFrame:
     if 'position' in df_unified.columns:
         print(df_unified['position'].value_counts())
     
+    print("\nTeam Column Validation:")
+    if 'team' in df_unified.columns:
+        print(f"  Data type: {df_unified['team'].dtype}")
+        print(f"  Unique teams: {df_unified['team'].nunique()}")
+        print(f"  Sample values: {df_unified['team'].dropna().head(5).tolist()}")
+    
     print("\nMissing Values in Key Columns:")
-    key_cols = ['total_points', 'minutes', 'position', 'expected_goals', 'expected_assists']
+    key_cols = ['total_points', 'minutes', 'position', 'team', 'expected_goals', 'expected_assists']
     available_key_cols = [col for col in key_cols if col in df_unified.columns]
     missing_summary = df_unified[available_key_cols].isna().sum()
     missing_pct = (missing_summary / len(df_unified) * 100).round(2)

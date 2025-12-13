@@ -128,15 +128,15 @@ def standardize_position_labels(df: pd.DataFrame) -> pd.DataFrame:
 
 def resolve_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Resolves duplicate player-gameweek records.
+    Resolves duplicate player-gameweek records with AGGREGATION strategy.
     
-    Duplicate resolution strategy:
-    1. If duplicates have identical data, keep first occurrence
-    2. If duplicates differ in fixture ID, they represent legitimate separate matches
-    3. If duplicates differ in statistics for same fixture, keep record with more minutes
+    Strategy Change:
+    - Double gameweeks (multiple fixtures) are LEGITIMATE in FPL
+    - Instead of keeping one fixture, AGGREGATE stats across both
+    - Mathematical justification: y_total = sum(y_fixture_i) for i in fixtures
     
-    The mathematical justification: we require unique observations in feature space
-    where each (player, gameweek) tuple maps to exactly one feature vector.
+    Example: Player scores 2 points in fixture A, 5 in fixture B
+    Result: Single record with 7 total points for that gameweek
     
     Parameters
     ----------
@@ -146,14 +146,14 @@ def resolve_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Dataframe with duplicates resolved
+        Dataframe with aggregated gameweek statistics
     """
     df = df.copy()
     
     initial_rows = len(df)
     
     # Identify duplicates based on player-gameweek combination
-    duplicate_mask = df.duplicated(subset=['element', 'GW'], keep=False)
+    duplicate_mask = df.duplicated(subset=['element', 'GW', 'season'], keep=False)
     n_duplicates = duplicate_mask.sum()
     
     if n_duplicates == 0:
@@ -162,33 +162,62 @@ def resolve_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     
     logger.info(f"Found {n_duplicates} duplicate player-gameweek records")
     
-    # Check if duplicates represent different fixtures
+    # Check if duplicates represent different fixtures (double gameweeks)
     if 'fixture' in df.columns:
         duplicates_df = df[duplicate_mask].copy()
-        
-        # Group by player-gameweek and check fixture variance
-        fixture_variance = duplicates_df.groupby(['element', 'GW'])['fixture'].nunique()
+        fixture_variance = duplicates_df.groupby(['element', 'GW', 'season'])['fixture'].nunique()
         multiple_fixtures = (fixture_variance > 1).sum()
         
         if multiple_fixtures > 0:
-            logger.info(f"{multiple_fixtures} player-gameweek pairs have multiple fixtures (legitimate)")
-            # These are legitimate - players who played multiple matches in one gameweek
-            # We keep all records for these cases
+            logger.info(f"{multiple_fixtures} double gameweeks detected - aggregating stats")
             
-            # Only remove duplicates where fixture is same
-            df = df.sort_values(['element', 'GW', 'fixture', 'minutes'], ascending=[True, True, True, False])
-            df = df.drop_duplicates(subset=['element', 'GW', 'fixture'], keep='first')
+            # Columns to SUM (cumulative stats across fixtures)
+            sum_cols = [
+                'total_points', 'minutes', 'goals_scored', 'assists',
+                'clean_sheets', 'goals_conceded', 'own_goals', 'penalties_saved',
+                'penalties_missed', 'yellow_cards', 'red_cards', 'saves',
+                'bonus', 'bps', 'influence', 'creativity', 'threat',
+                'expected_goals', 'expected_assists', 'expected_goal_involvements',
+                'expected_goals_conceded', 'transfers_in', 'transfers_out'
+            ]
+            
+            # Columns to AVERAGE (intensity metrics)
+            avg_cols = ['ict_index']
+            
+            # Columns to KEEP (should be identical across fixtures)
+            keep_cols = ['element', 'name', 'position', 'team', 'GW', 'season', 'value']
+            
+            # Filter to existing columns
+            sum_cols = [c for c in sum_cols if c in df.columns]
+            avg_cols = [c for c in avg_cols if c in df.columns]
+            keep_cols = [c for c in keep_cols if c in df.columns]
+            
+            # Aggregate double gameweeks
+            agg_dict = {col: 'sum' for col in sum_cols}
+            agg_dict.update({col: 'mean' for col in avg_cols})
+            agg_dict.update({col: 'first' for col in keep_cols if col not in ['element', 'GW', 'season']})
+            
+            df_agg = df[duplicate_mask].groupby(['element', 'GW', 'season'], as_index=False).agg(agg_dict)
+            
+            # Keep non-duplicates as-is
+            df_single = df[~duplicate_mask].copy()
+            
+            # Combine
+            df = pd.concat([df_single, df_agg], ignore_index=True)
+            
+            logger.info(f"Aggregated {n_duplicates} records into {len(df_agg)} gameweek summaries")
         else:
-            # All duplicates are for same fixture - keep record with most minutes
-            df = df.sort_values(['element', 'GW', 'minutes'], ascending=[True, True, False])
-            df = df.drop_duplicates(subset=['element', 'GW'], keep='first')
+            # Same-fixture duplicates - keep record with most minutes
+            logger.info("Same-fixture duplicates detected - keeping highest minutes")
+            df = df.sort_values(['element', 'GW', 'season', 'minutes'], ascending=[True, True, True, False])
+            df = df.drop_duplicates(subset=['element', 'GW', 'season'], keep='first')
     else:
-        # No fixture column - simple deduplication keeping first
-        df = df.drop_duplicates(subset=['element', 'GW'], keep='first')
+        # No fixture column - simple deduplication
+        df = df.drop_duplicates(subset=['element', 'GW', 'season'], keep='first')
     
     final_rows = len(df)
     removed = initial_rows - final_rows
-    logger.info(f"Removed {removed} duplicate records ({removed/initial_rows*100:.2f}%)")
+    logger.info(f"Final dataset: {final_rows:,} rows ({removed} aggregated)")
     
     return df
 

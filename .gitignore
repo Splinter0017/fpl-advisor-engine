@@ -14,3 +14,5 @@ run_pipeline.py
 run_fpl.bat
 tests/
 models/
+Notebooks/figures/
+

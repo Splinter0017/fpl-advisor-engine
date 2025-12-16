@@ -6,8 +6,6 @@ Features are constructed to capture temporal dependencies, contextual factors,
 and position-specific patterns in player performance. The feature space is
 designed to maximize predictive power while maintaining temporal validity.
 
-Author: Splinter
-Date: December 2025
 """
 
 import pandas as pd
@@ -166,8 +164,6 @@ def create_form_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = df.sort_values(['element', 'season', 'GW'])
     
-    # Compute season-level baselines
-    grouped = df.groupby(['element', 'season'])
     
     # Expanding mean and std (using only past data)
     df = df.sort_values(['element', 'season', 'GW'])
@@ -401,57 +397,6 @@ def create_home_away_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def create_rest_days_feature(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Creates rest days feature from kickoff_time.
-    
-    Physiological Foundation:
-    Performance Degradation ~ 1 / Rest Days
-    
-    - < 3 days: High fatigue risk (-15-20% performance)
-    - 3-4 days: Moderate recovery
-    - > 4 days: Full recovery
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Data with 'kickoff_time' column
-        
-    Returns
-    -------
-    pd.DataFrame
-        Data with rest_days feature
-    """
-    df = df.copy()
-    
-    if 'kickoff_time' not in df.columns:
-        logger.warning("kickoff_time column not found, skipping rest days features")
-        return df
-    
-    # Convert to datetime
-    df['kickoff_time'] = pd.to_datetime(df['kickoff_time'], errors='coerce')
-    
-    # Sort by player and time
-    df = df.sort_values(['element', 'kickoff_time'])
-    
-    # Days since last match
-    df['rest_days'] = (
-        df.groupby('element')['kickoff_time']
-        .diff()
-        .dt.total_seconds() / 86400
-    )
-    
-    # Fill first match of season with median rest
-    df['rest_days'] = df['rest_days'].fillna(7)
-    
-    # Categorical bins
-    df['rest_category_short'] = (df['rest_days'] < 3).astype(int)
-    df['rest_category_normal'] = ((df['rest_days'] >= 3) & (df['rest_days'] <= 5)).astype(int)
-    df['rest_category_long'] = (df['rest_days'] > 5).astype(int)
-    
-    logger.info("Created rest days features")
-    return df
-
 
 
 # POSITION-SPECIFIC FEATURES
@@ -594,81 +539,6 @@ class FeatureEngineer:
         return feature_cols
 
 
-# VALIDATION: TEMPORAL LEAKAGE DETECTION
-
-def check_temporal_leakage(df: pd.DataFrame, 
-                          feature_cols: List[str],
-                          target_col: str = 'total_points',
-                          sample_size: int = 10) -> None:
-    """
-    Validates that features don't leak future information.
-    
-    Test Strategy:
-    1. Check for NaN patterns (leakage often creates NaNs)
-    2. Correlation check: Future target should not correlate highly with current features
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Feature-engineered data
-    feature_cols : List[str]
-        List of feature column names
-    target_col : str
-        Target variable name
-    sample_size : int
-        Number of features to sample for correlation check
-    """
-    logger.info("\n" + "="*80)
-    logger.info("TEMPORAL LEAKAGE CHECK")
-    logger.info("="*80)
-    
-    # Test 1: Check for NaN patterns
-    logger.info("\nTest 1: NaN Pattern Analysis")
-    for col in feature_cols:
-        nan_pct = df[col].isna().sum() / len(df) * 100
-        if nan_pct == 100:
-            logger.warning(f"  [!] {col}: ALL VALUES ARE NaN")
-        elif nan_pct > 50:
-            logger.warning(f"  [!] {col}: {nan_pct:.1f}% NaN values")
-    
-    # Test 2: Future correlation check
-    logger.info("\nTest 2: Future Correlation Analysis (Sample)")
-    df_sorted = df.sort_values(['element', 'season', 'GW']).copy()
-    
-    # Sample features to check
-    sample_features = feature_cols[:min(sample_size, len(feature_cols))]
-    
-    for col in sample_features:
-        # Skip non-numeric columns
-        if not pd.api.types.is_numeric_dtype(df_sorted[col]):
-            logger.info(f"  [SKIP] {col}: Non-numeric column")
-            continue
-            
-        # Compare feature at GW t with target at GW t+1
-        df_sorted['future_target'] = df_sorted.groupby('element')[target_col].shift(-1)
-        
-        # Drop NaN for correlation calculation
-        temp_df = df_sorted[[col, 'future_target']].dropna()
-        
-        if len(temp_df) > 0:
-            try:
-                corr = temp_df[col].corr(temp_df['future_target'])
-                
-                if abs(corr) > 0.95:
-                    logger.error(f"  [X] {col}: Corr with future = {corr:.3f} - LEAKAGE SUSPECTED")
-                elif abs(corr) > 0.7:
-                    logger.warning(f"  [!] {col}: Corr with future = {corr:.3f} - HIGH (investigate)")
-                else:
-                    logger.info(f"  [OK] {col}: Corr with future = {corr:.3f}")
-            except (ValueError, TypeError) as e:
-                logger.warning(f"  [?] {col}: Could not compute correlation - {str(e)}")
-        else:
-            logger.warning(f"  [?] {col}: Insufficient data for correlation test")
-    
-    logger.info("\n" + "="*80)
-    logger.info("LEAKAGE CHECK COMPLETE")
-    logger.info("="*80)
-
 
 
 # MAIN EXECUTION
@@ -698,9 +568,6 @@ if __name__ == "__main__":
     # Get feature names
     feature_cols = engineer.get_feature_names(df_features)
     logger.info(f"\nEngineered {len(feature_cols)} new features")
-    
-    # Validate
-    check_temporal_leakage(df_features, feature_cols, sample_size=15)
     
     # Save
     output_file = PROCESSED_DIR / "fpl_features_engineered.csv"

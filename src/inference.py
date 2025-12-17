@@ -61,7 +61,7 @@ class FPLInferenceEngine:
                 # Clip negative predictions (impossible in FPL context usually)
                 cond_points = np.maximum(cond_points, 0)
         
-        # 3. COMBINE: Expected Points (Hurdle Model)
+        # 3. COMBINE: Expected Points 
         self.df[f'xP{suffix}'] = prob_play * cond_points
     
     def generate_report(self, current_gw: int) -> pd.DataFrame:
@@ -74,7 +74,6 @@ class FPLInferenceEngine:
         for h in horizons:
             self._predict_horizon(h, X, current_gw)
             
-        # --- AGGREGATION ---
         xp_cols = [f'xP_GW{current_gw + h - 1}' for h in horizons]
         available_xp_cols = [col for col in xp_cols if col in self.df.columns]
         
@@ -93,9 +92,10 @@ class FPLInferenceEngine:
         
         output_cols = meta_cols + available_xp_cols + ['xP_3GW_Total'] + prob_cols
         
-        # Filter active players
-        if 'minutes' in self.df.columns:
-            active_players = self.df[self.df['minutes'] > 0].copy()
+        
+        # Only filtering dead assets (Value < 3.9m) to reduce noise
+        if 'value' in self.df.columns:
+            active_players = self.df[self.df['value'] >= 39].copy()
         else:
             active_players = self.df.copy()
             
@@ -165,7 +165,7 @@ def get_model_features(df: pd.DataFrame) -> List[str]:
         'match_score', 'value', 'selected', 'transfers_', 'was_home',
         'team_h_score', 'team_a_score', 'target_', 'xP_', 'prob_', 'minutes'
     ]
- 
+    
     feature_cols = []
     for col in df.columns:
         if any(pattern in col for pattern in exclude_patterns):

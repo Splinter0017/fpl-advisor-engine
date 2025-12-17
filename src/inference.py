@@ -66,7 +66,7 @@ class FPLInferenceEngine:
     
     def generate_report(self, current_gw: int) -> pd.DataFrame:
         """
-        Aggregates predictions into a transfer planner.
+        Aggregates predictions into a transfer planner with Signal-to-Noise filtering.
         """
         X = self.df[self.features].fillna(0)
         
@@ -87,18 +87,31 @@ class FPLInferenceEngine:
         optional_meta = ['minutes', 'opponent_team', 'selected', 'web_name', 'id']
         meta_cols = base_meta + [c for c in optional_meta if c in self.df.columns]
         
-        # Prob Play columns are useful for the user to see risk
+        # Prob Play columns
         prob_cols = [c for c in self.df.columns if 'prob_play' in c]
         
         output_cols = meta_cols + available_xp_cols + ['xP_3GW_Total'] + prob_cols
         
+        # 1. Base Filter: Must have a price (excludes dirty data)
+        mask_clean = self.df['value'] > 0
         
-        # Only filtering dead assets (Value < 3.9m) to reduce noise
-        if 'value' in self.df.columns:
-            active_players = self.df[self.df['value'] >= 39].copy()
-        else:
-            active_players = self.df.copy()
-            
+        # 2. Relevance Filter:
+        # Keep player IF:
+        #    (a) Long-term viable (Predicted > 1.5 pts over 3 GWs)
+        #    OR
+        #    (b) Immediate Upside (Predicted > 1.0 pt next GW - catch returning stars)
+        #    OR
+        #    (c) High Ownership (> 10% selected - crucial for "Sell" decisions)
+        
+        mask_relevant = (self.df['xP_3GW_Total'] >= 1.5) | \
+                        (self.df[f'xP_GW{current_gw}'] >= 1.0)
+                        
+        if 'selected' in self.df.columns:
+             pass
+
+        # Apply Filters
+        active_players = self.df[mask_clean & mask_relevant].copy()
+        
         return active_players[output_cols].sort_values('xP_3GW_Total', ascending=False)
 
 

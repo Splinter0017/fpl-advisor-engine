@@ -5,8 +5,9 @@ __pycache__/
 # Ignore environment variables and secrets`
 config/
 .env
+.ipynb_checkpoints/
 
-# Ignore data files (too large/private for git)
+# Ignore data files 
 data/
 venv/
 .vscode/
@@ -15,4 +16,4 @@ run_fpl.bat
 tests/
 models/
 Notebooks/figures/
-
+outputs/
